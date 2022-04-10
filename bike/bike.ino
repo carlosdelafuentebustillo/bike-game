@@ -1,60 +1,73 @@
-/*
-  Analog input, analog output, serial output
+#include <ArduinoBLE.h>
 
-  Reads an analog input pin, maps the result to a range from 0 to 255 and uses
-  the result to set the pulse width modulation (PWM) of an output pin.
-  Also prints the results to the Serial Monitor.
-
-  The circuit:
-  - potentiometer connected to analog pin 0.
-    Center pin of the potentiometer goes to the analog pin.
-    side pins of the potentiometer go to +5V and ground
-  - LED connected from digital pin 9 to ground
-
-  created 29 Dec. 2008
-  modified 9 Apr 2012
-  by Tom Igoe
-
-  This example code is in the public domain.
-
-  http://www.arduino.cc/en/Tutorial/AnalogInOutSerial
-*/
-
-// These constants won't change. They're used to give names to the pins used:
-const int analogInPin0 = A0;  // Ring
-const int analogInPin1 = A1;  // Tip
-const int analogInPin2 = A2;  // Ring
-const int analogInPin3 = A3;  // Tip
-
-int sensorValue0 = 0;        // value read from the pot
-int sensorValue1 = 0;        // value read from the pot
-int sensorValue2 = 0;        // value read from the pot
-int sensorValue3 = 0;        // value read from the pot
+BLEService bikeService("19B10000-E8F2-537E-4F6C-D104768A1214"); // BLE LED Service
+// BLE LED Switch Characteristic - custom 128-bit UUID, read and writable by central
+BLEByteCharacteristic hrCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead);
+BLEByteCharacteristic speedCharacteristic("19B10002-E8F2-537E-4F6C-D104768A1214", BLERead);
+BLEByteCharacteristic resistanceCharacteristic("19B10003-E8F2-537E-4F6C-D104768A1214", BLERead | BLEWrite);
 
 
+
+int odometer = 15;    // Analog pin 1 digital pin 15 first jack
+const int AVG = 4;    // Number of reads necessary to count as a pulse
+int counter = 0; unsigned long startTime; unsigned long runTime; unsigned long duration;
+
+// the setup routine runs once when you press reset:
 void setup() {
-  // initialize serial communications at 9600 bps:
+  // initialize serial communication at 9600 bits per second:
   Serial.begin(9600);
+  // make the pushbutton's pin an input:
+  pinMode(odometer, INPUT_PULLUP);
+  // begin initialization
+  if (!BLE.begin()) {
+    Serial.println("starting BLE failed!");
+    while (1);
+  }
+
+  // set advertised local name and service UUID:
+  BLE.setLocalName("BIKE");
+  BLE.setAdvertisedService(bikeService);
+
+  // add the characteristic to the service
+  bikeService.addCharacteristic(hrCharacteristic);
+  bikeService.addCharacteristic(speedCharacteristic);
+  bikeService.addCharacteristic(resistanceCharacteristic);
+
+  // add service
+  BLE.addService(bikeService);
+  // set the initial value for the characeristic:
+  hrCharacteristic.writeValue(0);
+  speedCharacteristic.writeValue(0);
+  resistanceCharacteristic.writeValue(0);
+  // start advertising
+  BLE.advertise();
+  Serial.println("BLE Bike Peripheral");
 }
 
+// the loop routine runs over and over again forever:
 void loop() {
-  // read the analog in value:
-  sensorValue0 = digitalRead(analogInPin0);
-  sensorValue1 = analogRead(analogInPin1);
-  sensorValue2 = analogRead(analogInPin2);
-  sensorValue3 = analogRead(analogInPin3);
-
-  // print the results to the Serial Monitor:
-//  Serial.print("sensor0 = ");
-  Serial.println(sensorValue1);
-//  Serial.print("\t sensor1 = ");
-//  Serial.print(sensorValue1);
-//  Serial.print("\t sensor2 = ");
-//  Serial.print(sensorValue2);
-//  Serial.print("\t sensor3 = ");
-//  Serial.println(sensorValue3);
-
-  // wait 2 milliseconds before the next loop for the analog-to-digital
-  // converter to settle after the last reading:
-  delay(2);
+  BLEDevice central = BLE.central();
+  if (central) {
+    Serial.print(F("Connected to central: "));
+    Serial.println(central.address());
+    // while the central is still connected to peripheral:
+    while (central.connected()) {
+      // read the input pin:
+      int odometer_state = digitalRead(odometer);
+      if (!digitalRead(odometer)){counter++;}   // if pulse read increase counter
+      else{counter = 0;}
+      if(counter==AVG){
+        runTime = millis();
+        duration = runTime - startTime;
+        startTime = millis();
+        Serial.println(duration);
+        if(duration < 2550){    
+          speedCharacteristic.writeValue(duration/10); // Send cents of a second
+        }
+      }
+    }
+    // when the central disconnects, print it out:
+    Serial.print(F("Disconnected from central: "));
+    Serial.println(central.address());
+  }    
 }
